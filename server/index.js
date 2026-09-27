@@ -216,14 +216,16 @@ function parseBing(html) {
   const out = [];
   const blocks = String(html).split('class="b_algo"');
   for (let b = 1; b < blocks.length && out.length < 10; b++) {
-    const seg = blocks[b].slice(0, 8000);
+    const seg = blocks[b].slice(0, 12000);
     const cm = /<cite>([^<]{5,300})<\/cite>/.exec(seg);
     if (!cm) continue;
     let url = decodeEntities(cm[1]).replace(/\s*[›>]\s*/g, "/").replace(/\s+/g, "").replace(/\/+$/, "");
     if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-    let title = url;
-    const tm = /<h2[^>]*>\s*<a[^>]*>([\s\S]{1,300}?)<\/a>\s*<\/h2>/.exec(seg);
-    if (tm) title = decodeEntities(tm[1].replace(/<[^>]*>/g, "")).trim() || title;
+    let title = "";
+    const tm = /<h2[^>]*>\s*<a[^>]*>([\s\S]{1,300}?)<\/a>\s*<\/h2>/.exec(seg) ||
+               /<h2[^>]*>([\s\S]{1,300}?)<\/h2>/.exec(seg);
+    if (tm) title = decodeEntities(tm[1].replace(/<[^>]*>/g, "")).trim();
+    if (!title) title = url;
     if (out.some((o) => o.url === url)) continue;
     out.push({ title, url, snippet: "" });
   }
