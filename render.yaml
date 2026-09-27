@@ -1,6 +1,6 @@
 services:
   # 前端静态站（网址不变）
-  - type: static
+  - type: static_site
     name: paper-formatter
     staticPublishPath: ./
   # 在线查找 API（Node，零依赖）
