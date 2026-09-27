@@ -266,7 +266,14 @@ function rankResults(results, q) {
   out.forEach((it, i) => { it._rank = relevanceScore(it, q) * 1000 - i; });
   out.sort((a, b) => b._rank - a._rank);
   out.forEach((it) => { delete it._rank; });
-  return out.slice(0, 6); // 只保留最相关的 6 条，避免候选过多过杂
+  const top = out.slice(0, 6); // 只保留最相关的 6 条，避免候选过多过杂
+  // 只有首条完整包含刊名时才标"推荐"，避免把别家期刊的页面误标为官网
+  const ql = (q || "").toLowerCase().trim();
+  if (top.length && ql && ql.length >= 3) {
+    const t0 = ((top[0].title || "") + " " + (top[0].url || "")).toLowerCase();
+    if (t0.includes(ql)) top[0].recommended = true;
+  }
+  return top;
 }
 async function webSearch(query) {
   const q = encodeURIComponent(query);
