@@ -2555,6 +2555,9 @@ PF.checks = (function () {
   function show(id) { $(id).hidden = false; }
   function hide(id) { $(id).hidden = true; }
 
+  // 在线查找 API 地址：线上为独立的 API 服务；留空则走同源 /api（本地 node server/index.js 调试用）
+  var API_BASE = "";
+
   function toast(msg, ms) {
     var t = $("toast");
     t.textContent = msg; t.hidden = false;
@@ -2780,13 +2783,15 @@ PF.checks = (function () {
     box.innerHTML = '<p class="hint">正在联网搜索「' + esc(name) + '」的投稿须知…</p>';
     var data = null;
     try {
-      var r = await fetch("/api/search?q=" + encodeURIComponent(name), { cache: "no-store" });
+      var r = await fetch(API_BASE + "/api/search?q=" + encodeURIComponent(name), { cache: "no-store" });
       data = await r.json();
     } catch (e) { /* 离线文件或网络异常 */ }
     if (!data || !data.ok) {
-      box.innerHTML = '<p class="hint">在线查找不可用' +
-        (data && data.error ? '（' + esc(data.error) + '）' : '') +
-        '。离线单文件版不支持在线查找，请使用在线版；或改用「粘贴投稿须知」手动粘贴该刊投稿须知文字。</p>';
+      var reason = data && data.error ? '（' + esc(data.error) + '）' : '';
+      var advice = API_BASE
+        ? '。可能是 API 服务正在唤醒（闲置后首次调用较慢），请稍后重试；或改用「粘贴投稿须知」手动粘贴该刊投稿须知文字。'
+        : '。离线单文件版不支持在线查找，请使用在线版；或改用「粘贴投稿须知」手动粘贴该刊投稿须知文字。';
+      box.innerHTML = '<p class="hint">在线查找不可用' + reason + advice + '</p>';
       return;
     }
     if (!data.results || !data.results.length) {
@@ -2811,7 +2816,7 @@ PF.checks = (function () {
     box.innerHTML = '<p class="hint">正在抓取并解析：' + esc(url) + ' …</p>';
     var data = null;
     try {
-      var r = await fetch("/api/fetch?url=" + encodeURIComponent(url), { cache: "no-store" });
+      var r = await fetch(API_BASE + "/api/fetch?url=" + encodeURIComponent(url), { cache: "no-store" });
       data = await r.json();
     } catch (e) { /* ignore */ }
     if (!data || !data.ok) {
