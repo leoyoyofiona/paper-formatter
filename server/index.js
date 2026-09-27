@@ -242,16 +242,19 @@ function augmentQuery(q) {
   if (!suffix) suffix = " author guidelines 投稿须知";
   return q + suffix;
 }
-// 投稿须知页优先，词典/广告/登录页降权
-function relevanceScore(it) {
+// 投稿须知页优先，词典/广告/登录页降权；q 为用户输入的原始刊名
+function relevanceScore(it, q) {
   const t = (((it.title || "") + " " + (it.url || "") + " " + (it.snippet || "")).toLowerCase());
+  const ql = (q || "").toLowerCase().trim();
   let s = 0;
+  if (ql && ql.length >= 3 && t.includes(ql)) s += 8; // 刊名完整出现在标题或网址中
   for (const k of ["author guidelines", "instructions for authors", "guide for authors", "submission guidelines", "投稿须知", "征稿简则", "作者须知"]) if (t.includes(k)) s += 3;
   for (const k of ["tandfonline", "elsevier", "springer", "link.springer", "wiley", "sagepub", "taylorfrancis", "emerald", "mdpi", "frontiersin"]) if (t.includes(k)) s += 2;
   for (const k of ["dictionary", "merriam", "cambridge", "interactivebrokers", "honda", "/sso/", "login", "investopedia", "wikipedia.org/wiki"]) if (t.includes(k)) s -= 6;
+  for (const k of ["citation generator", "citation style", "citation-style", "paperpile", "citationsy", "paperpal", "scribd", "chegg", "studocu", "coursehero"]) if (t.includes(k)) s -= 6;
   return s;
 }
-function rankResults(results) {
+function rankResults(results, q) {
   const seen = new Set();
   const out = [];
   for (const it of results) {
@@ -260,10 +263,10 @@ function rankResults(results) {
     seen.add(key);
     out.push(it);
   }
-  out.forEach((it, i) => { it._rank = relevanceScore(it) * 1000 - i; });
+  out.forEach((it, i) => { it._rank = relevanceScore(it, q) * 1000 - i; });
   out.sort((a, b) => b._rank - a._rank);
   out.forEach((it) => { delete it._rank; });
-  return out;
+  return out.slice(0, 6); // 只保留最相关的 6 条，避免候选过多过杂
 }
 async function webSearch(query) {
   const q = encodeURIComponent(query);
@@ -283,9 +286,12 @@ async function webSearch(query) {
       .catch((e) => { console.error("[search]", p.name, "失败:", e.message); throw e; })
   );
   const settled = await Promise.allSettled(attempts);
+  // 合并所有成功来源的结果（而不是只用第一个成功的），再由调用方排序去重
+  const merged = [];
   for (const s of settled) {
-    if (s.status === "fulfilled" && s.value && s.value.length) return s.value;
+    if (s.status === "fulfilled" && s.value && s.value.length) merged.push(...s.value);
   }
+  if (merged.length) return merged;
   const msgs = settled
     .filter((s) => s.status === "rejected")
     .map((s) => String((s.reason && s.reason.message) || s.reason));
@@ -320,7 +326,7 @@ const server = http.createServer((req, res) => {
     const q = (u.searchParams.get("q") || "").trim().slice(0, 100);
     if (!q) { json(res, 400, { ok: false, error: "缺少 q 参数" }); return; }
     webSearch(augmentQuery(q)).then((results) => {
-      json(res, 200, { ok: true, query: q, results: rankResults(results) });
+      json(res, 200, { ok: true, query: q, results: rankResults(results, q) });
     }).catch((e) => {
       json(res, 502, { ok: false, error: "联网搜索失败：" + e.message });
     });
