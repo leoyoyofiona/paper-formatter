@@ -209,7 +209,11 @@ async function ddgSearch(query) {
 /* ---------------- HTTP 服务 ---------------- */
 function json(res, code, obj) {
   const body = JSON.stringify(obj);
-  res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.writeHead(code, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*", // 前端静态站跨域调用
+  });
   res.end(body);
 }
 
