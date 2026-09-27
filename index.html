@@ -2555,8 +2555,17 @@ PF.checks = (function () {
   function show(id) { $(id).hidden = false; }
   function hide(id) { $(id).hidden = true; }
 
-  // 在线查找 API 地址：线上为独立的 API 服务；留空则走同源 /api（本地 node server/index.js 调试用）
-  var API_BASE = "";
+  // 在线查找 API 地址：
+  // - 线上静态站（onrender.com）走独立 API 服务 https://paper-formatter-api.onrender.com
+  // - 本地 node server/index.js 调试走同源 /api（留空即同源）
+  // - file:// 离线单文件版禁用在线查找
+  var API_BASE = (function () {
+    try {
+      if (location.protocol === "file:") return "";
+      if (/(^|\.)onrender\.com$/.test(location.hostname)) return "https://paper-formatter-api.onrender.com";
+    } catch (e) { /* ignore */ }
+    return "";
+  })();
 
   function toast(msg, ms) {
     var t = $("toast");
@@ -2780,7 +2789,8 @@ PF.checks = (function () {
     var name = $("journal-name").value.trim();
     if (!name) { toast("请输入期刊名"); return; }
     var box = $("journal-online-result");
-    box.innerHTML = '<p class="hint">正在联网搜索「' + esc(name) + '」的投稿须知…</p>';
+    box.innerHTML = '<p class="hint">正在联网搜索「' + esc(name) + '」的投稿须知…' +
+      (API_BASE ? '（免费服务闲置后首次搜索可能需要约半分钟唤醒，请耐心等待）' : '') + '</p>';
     var data = null;
     try {
       var r = await fetch(API_BASE + "/api/search?q=" + encodeURIComponent(name), { cache: "no-store" });
