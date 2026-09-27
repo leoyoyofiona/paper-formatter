@@ -191,7 +191,7 @@ function parseDdgHtml(html, base) {
 }
 function parseDdgLite(html, base) {
   const out = [];
-  const re = /<a[^>]+class='result-link'[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const re = /<a(?=[^>]*class='result-link')[^>]*?href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let m;
   while ((m = re.exec(html)) && out.length < 10) {
     let href = decodeEntities(m[1]);
