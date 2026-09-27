@@ -1,5 +1,6 @@
 services:
   - type: web
     name: paper-formatter
-    runtime: static
-    staticPublishPath: .
+    runtime: node
+    startCommand: node server/index.js
+    # 零依赖，无需 buildCommand
