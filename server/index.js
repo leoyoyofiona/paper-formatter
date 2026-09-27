@@ -231,6 +231,40 @@ function parseBing(html) {
   }
   return out;
 }
+/* ---------------- 搜索关键词增强 + 相关度排序 ---------------- */
+// 英文刊名补 "author guidelines"，中文刊名补"投稿须知"，避免英文词被当成普通单词搜
+function augmentQuery(q) {
+  const hasCjk = /[一-鿿]/.test(q);
+  const hasLatin = /[a-zA-Z]/.test(q);
+  let suffix = "";
+  if (hasLatin) suffix += " author guidelines instructions for authors";
+  if (hasCjk) suffix += " 投稿须知";
+  if (!suffix) suffix = " author guidelines 投稿须知";
+  return q + suffix;
+}
+// 投稿须知页优先，词典/广告/登录页降权
+function relevanceScore(it) {
+  const t = (((it.title || "") + " " + (it.url || "") + " " + (it.snippet || "")).toLowerCase());
+  let s = 0;
+  for (const k of ["author guidelines", "instructions for authors", "guide for authors", "submission guidelines", "投稿须知", "征稿简则", "作者须知"]) if (t.includes(k)) s += 3;
+  for (const k of ["tandfonline", "elsevier", "springer", "link.springer", "wiley", "sagepub", "taylorfrancis", "emerald", "mdpi", "frontiersin"]) if (t.includes(k)) s += 2;
+  for (const k of ["dictionary", "merriam", "cambridge", "interactivebrokers", "honda", "/sso/", "login", "investopedia", "wikipedia.org/wiki"]) if (t.includes(k)) s -= 6;
+  return s;
+}
+function rankResults(results) {
+  const seen = new Set();
+  const out = [];
+  for (const it of results) {
+    const key = (it.url || "").replace(/[#?].*$/, "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  out.forEach((it, i) => { it._rank = relevanceScore(it) * 1000 - i; });
+  out.sort((a, b) => b._rank - a._rank);
+  out.forEach((it) => { delete it._rank; });
+  return out;
+}
 async function webSearch(query) {
   const q = encodeURIComponent(query);
   const providers = [
@@ -285,8 +319,8 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && p === "/api/search") {
     const q = (u.searchParams.get("q") || "").trim().slice(0, 100);
     if (!q) { json(res, 400, { ok: false, error: "缺少 q 参数" }); return; }
-    webSearch(q + " 投稿须知").then((results) => {
-      json(res, 200, { ok: true, query: q, results });
+    webSearch(augmentQuery(q)).then((results) => {
+      json(res, 200, { ok: true, query: q, results: rankResults(results) });
     }).catch((e) => {
       json(res, 502, { ok: false, error: "联网搜索失败：" + e.message });
     });
