@@ -2784,6 +2784,26 @@ PF.checks = (function () {
     };
   }
 
+  // 带超时的 fetch + JSON 解析；超时或网络异常时返回 { __transportError: 说明 }
+  async function fetchJSON(url, timeoutMs) {
+    var ctrl = null, timer = null;
+    try {
+      if (typeof AbortController !== "undefined") {
+        ctrl = new AbortController();
+        timer = setTimeout(function () { ctrl.abort(); }, timeoutMs);
+      }
+      var opt = { cache: "no-store" };
+      if (ctrl) opt.signal = ctrl.signal;
+      var r = await fetch(url, opt);
+      return await r.json();
+    } catch (e) {
+      var timeout = e && e.name === "AbortError";
+      return { __transportError: timeout ? "请求超时（超过" + Math.round(timeoutMs / 1000) + "秒无响应）" : "网络异常" };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   // ---------------- 期刊在线查找（仅在线版，后端 /api/*） ----------------
   async function onlineJournalSearch() {
     var name = $("journal-name").value.trim();
@@ -2791,11 +2811,8 @@ PF.checks = (function () {
     var box = $("journal-online-result");
     box.innerHTML = '<p class="hint">正在联网搜索「' + esc(name) + '」的投稿须知…' +
       (API_BASE ? '（免费服务闲置后首次搜索可能需要约半分钟唤醒，请耐心等待）' : '') + '</p>';
-    var data = null;
-    try {
-      var r = await fetch(API_BASE + "/api/search?q=" + encodeURIComponent(name), { cache: "no-store" });
-      data = await r.json();
-    } catch (e) { /* 离线文件或网络异常 */ }
+    var data = await fetchJSON(API_BASE + "/api/search?q=" + encodeURIComponent(name), 60000);
+    if (data && data.__transportError) data = { ok: false, error: data.__transportError };
     if (!data || !data.ok) {
       var reason = data && data.error ? '（' + esc(data.error) + '）' : '';
       var advice = API_BASE
@@ -2823,27 +2840,30 @@ PF.checks = (function () {
 
   async function fetchParseJournal(url) {
     var box = $("journal-online-result");
-    box.innerHTML = '<p class="hint">正在抓取并解析：' + esc(url) + ' …</p>';
-    var data = null;
     try {
-      var r = await fetch(API_BASE + "/api/fetch?url=" + encodeURIComponent(url), { cache: "no-store" });
-      data = await r.json();
-    } catch (e) { /* ignore */ }
-    if (!data || !data.ok) {
-      box.innerHTML = '<p class="hint">抓取失败' +
-        (data && data.error ? '（' + esc(data.error) + '）' : '') +
-        '。可换一个候选页重试，或把投稿须知文字复制到「粘贴投稿须知」手动解析。</p>';
-      return;
+      box.innerHTML = '<p class="hint">正在抓取并解析：' + esc(url) + ' …（最多等待约50秒）</p>';
+      var data = await fetchJSON(API_BASE + "/api/fetch?url=" + encodeURIComponent(url), 50000);
+      if (data && data.__transportError) data = { ok: false, error: data.__transportError };
+      if (!data || !data.ok) {
+        box.innerHTML = '<p class="hint">抓取失败' +
+          (data && data.error ? '（' + esc(data.error) + '）' : '') +
+          '。可换一个候选页重试，或把投稿须知文字复制到「粘贴投稿须知」手动解析。</p>';
+        return;
+      }
+      // 复用粘贴页签的解析流程
+      $("guideline-text").value = data.text;
+      document.querySelectorAll(".tab").forEach(function (t) {
+        t.classList.toggle("active", t.dataset.tab === "paste");
+      });
+      document.querySelectorAll(".tabpanel").forEach(function (p) { p.hidden = true; });
+      $("tab-paste").hidden = false;
+      parseGuideline(data.url);
+      toast("已抓取该页投稿须知，请核对下面的要求清单", 4500);
+    } catch (e) {
+      // 兜底：任何意外异常都必须显示可见提示，绝不静默
+      box.innerHTML = '<p class="hint">抓取过程出现异常（' + esc((e && e.message) || "未知错误") +
+        '）。可换一个候选页重试，或把投稿须知文字复制到「粘贴投稿须知」手动解析。</p>';
     }
-    // 复用粘贴页签的解析流程
-    $("guideline-text").value = data.text;
-    document.querySelectorAll(".tab").forEach(function (t) {
-      t.classList.toggle("active", t.dataset.tab === "paste");
-    });
-    document.querySelectorAll(".tabpanel").forEach(function (p) { p.hidden = true; });
-    $("tab-paste").hidden = false;
-    parseGuideline(data.url);
-    toast("已抓取该页投稿须知，请核对下面的要求清单", 4500);
   }
 
   // ---------------- 内置模板 / 已存模板 ----------------
