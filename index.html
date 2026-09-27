@@ -76,7 +76,7 @@ ol.steps { padding-left: 20px; } ol.steps li { margin: 8px 0; }
 <header class="topbar">
   <div class="wrap">
     <h1>📄 论文一键排版助手</h1>
-    <p class="sub">粘贴投稿须知 / 输入期刊名，一键排版 · 格式检查 · 参考文献转换 —— 论文只在本地浏览器处理，不上传 <span class="ver">v1.9.2</span></p>
+    <p class="sub">粘贴投稿须知 / 输入期刊名，一键排版 · 格式检查 · 参考文献转换 —— 论文只在本地浏览器处理，不上传 <span class="ver">v1.10.0</span></p>
   </div>
 </header>
 
@@ -138,9 +138,11 @@ ol.steps { padding-left: 20px; } ol.steps li { margin: 8px 0; }
           <option value="chinese">中文综合</option>
         </select>
         <button class="btn primary" id="btn-journal">查找模板</button>
+        <button class="btn" id="btn-journal-online">在线查找</button>
       </div>
+      <div id="journal-online-result"></div>
       <div id="journal-result"></div>
-      <p class="hint">期刊名查找只按内置规则推荐通用模板与参考文献格式，不联网检索期刊官网。如需该刊的具体格式要求，请用「粘贴投稿须知」把该刊官网的投稿须知文字粘贴进来解析，确认后可保存为模板复用。</p>
+      <p class="hint">「在线查找」联网搜索该期刊官网的投稿须知（仅在线版可用），抓取后自动解析并标注来源，请核对确认后再使用。「查找模板」仅按内置规则推荐通用模板，不联网。</p>
       <div id="saved-tpls"></div>
     </div>
 
@@ -2624,6 +2626,7 @@ PF.checks = (function () {
     $("btn-parse").onclick = parseGuideline;
     $("btn-confirm-rules").onclick = confirmRules;
     $("btn-journal").onclick = searchJournal;
+    $("btn-journal-online").onclick = onlineJournalSearch;
     $("btn-ref-preview").onclick = refPreview;
     $("btn-format").onclick = runFormat;
     $("btn-download").onclick = downloadDocx;
@@ -2675,7 +2678,7 @@ PF.checks = (function () {
   }
 
   // ---------------- 投稿须知解析 ----------------
-  function parseGuideline() {
+  function parseGuideline(sourceUrl) {
     var text = $("guideline-text").value;
     var lang = document.querySelector('input[name="glang"]:checked').value;
     if (!text.trim()) { toast("请先粘贴投稿须知文字"); return; }
@@ -2683,6 +2686,12 @@ PF.checks = (function () {
     S.parsedRules = res;
     var box = $("rules-list");
     box.innerHTML = "";
+    if (typeof sourceUrl === "string" && sourceUrl) {
+      var srcDiv = document.createElement("p");
+      srcDiv.className = "hint";
+      srcDiv.innerHTML = "来源（在线抓取）：<b>" + esc(sourceUrl) + "</b>　请确认这是该期刊的官网页面，规则请逐条核对。";
+      box.appendChild(srcDiv);
+    }
     if (!res.rules.length) {
       box.innerHTML = '<p class="hint">未能识别出明确的排版规则，请检查文字内容，或换用「直接选模板」。</p>';
     }
@@ -2761,6 +2770,65 @@ PF.checks = (function () {
       toast("已选用推荐组合");
       onTemplateReady();
     };
+  }
+
+  // ---------------- 期刊在线查找（仅在线版，后端 /api/*） ----------------
+  async function onlineJournalSearch() {
+    var name = $("journal-name").value.trim();
+    if (!name) { toast("请输入期刊名"); return; }
+    var box = $("journal-online-result");
+    box.innerHTML = '<p class="hint">正在联网搜索「' + esc(name) + '」的投稿须知…</p>';
+    var data = null;
+    try {
+      var r = await fetch("/api/search?q=" + encodeURIComponent(name), { cache: "no-store" });
+      data = await r.json();
+    } catch (e) { /* 离线文件或网络异常 */ }
+    if (!data || !data.ok) {
+      box.innerHTML = '<p class="hint">在线查找不可用' +
+        (data && data.error ? '（' + esc(data.error) + '）' : '') +
+        '。离线单文件版不支持在线查找，请使用在线版；或改用「粘贴投稿须知」手动粘贴该刊投稿须知文字。</p>';
+      return;
+    }
+    if (!data.results || !data.results.length) {
+      box.innerHTML = '<p class="hint">没有搜到相关投稿须知页面，换个关键词试试，或改用「粘贴投稿须知」。</p>';
+      return;
+    }
+    var html = "<h4>搜到以下投稿须知候选页（请认准期刊官网）</h4>";
+    data.results.forEach(function (it) {
+      html += '<div class="cand"><div style="flex:1"><b>' + esc(it.title) + "</b>" +
+        '<div class="rs">' + esc(it.url) + "</div>" +
+        (it.snippet ? '<div class="rs">' + esc(it.snippet) + "</div>" : "") + "</div>" +
+        '<div><button class="btn" data-u="' + esc(it.url) + '">抓取并解析</button></div></div>';
+    });
+    box.innerHTML = html;
+    box.querySelectorAll("button[data-u]").forEach(function (b) {
+      b.onclick = function () { fetchParseJournal(b.getAttribute("data-u")); };
+    });
+  }
+
+  async function fetchParseJournal(url) {
+    var box = $("journal-online-result");
+    box.innerHTML = '<p class="hint">正在抓取并解析：' + esc(url) + ' …</p>';
+    var data = null;
+    try {
+      var r = await fetch("/api/fetch?url=" + encodeURIComponent(url), { cache: "no-store" });
+      data = await r.json();
+    } catch (e) { /* ignore */ }
+    if (!data || !data.ok) {
+      box.innerHTML = '<p class="hint">抓取失败' +
+        (data && data.error ? '（' + esc(data.error) + '）' : '') +
+        '。可换一个候选页重试，或把投稿须知文字复制到「粘贴投稿须知」手动解析。</p>';
+      return;
+    }
+    // 复用粘贴页签的解析流程
+    $("guideline-text").value = data.text;
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.classList.toggle("active", t.dataset.tab === "paste");
+    });
+    document.querySelectorAll(".tabpanel").forEach(function (p) { p.hidden = true; });
+    $("tab-paste").hidden = false;
+    parseGuideline(data.url);
+    toast("已抓取该页投稿须知，请核对下面的要求清单", 4500);
   }
 
   // ---------------- 内置模板 / 已存模板 ----------------
