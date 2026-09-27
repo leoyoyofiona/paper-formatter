@@ -77,6 +77,8 @@ function fetchBuffer(targetUrl, { timeoutMs = 15000, maxBytes = 3 * 1024 * 1024,
       const lib = u.protocol === "https:" ? https : http;
       const req = lib.request(u, {
         method: "GET",
+        // 机房 IPv6 出站不通时快速回落 IPv4，避免连接挂起直到超时（Node 20+；旧版忽略该选项）
+        autoSelectFamily: true,
         headers: { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8" },
       }, (res) => {
         const loc = res.headers.location;
@@ -162,7 +164,7 @@ function htmlToText(buffer, contentType) {
   return { title, text };
 }
 
-/* ---------------- 联网搜索（DuckDuckGo HTML 端） ---------------- */
+/* ---------------- 联网搜索（多源并行：DDG HTML / DDG Lite / Bing） ---------------- */
 function parseDdgHtml(html, base) {
   const out = [];
   const re = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
@@ -187,23 +189,71 @@ function parseDdgHtml(html, base) {
   }
   return out;
 }
-async function ddgSearch(query) {
-  const q = encodeURIComponent(query);
-  const endpoints = [
-    "https://html.duckduckgo.com/html/?q=" + q,
-    "https://lite.duckduckgo.com/lite/?q=" + q,
-  ];
-  let lastErr = null;
-  for (const ep of endpoints) {
-    try {
-      const { buffer } = await fetchBuffer(ep, { timeoutMs: 15000, maxBytes: 1024 * 1024 });
-      const html = new TextDecoder("utf-8").decode(buffer);
-      const results = parseDdgHtml(html, ep);
-      if (results.length) return results;
-      lastErr = new Error("无搜索结果");
-    } catch (e) { lastErr = e; }
+function parseDdgLite(html, base) {
+  const out = [];
+  const re = /<a[^>]+class='result-link'[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) && out.length < 10) {
+    let href = decodeEntities(m[1]);
+    let title = decodeEntities(m[2].replace(/<[^>]*>/g, "")).trim();
+    const um = /[?&]uddg=([^&]+)/.exec(href);
+    if (um) { try { href = decodeURIComponent(um[1]); } catch (e) { /* keep */ } }
+    try { href = new URL(href, base).toString(); } catch (e) { continue; }
+    if (!/^https?:/.test(href) || /duckduckgo\.com/.test(href)) continue;
+    if (out.some((o) => o.url === href)) continue;
+    out.push({ title: title || href, url: href, snippet: "" });
   }
-  throw lastErr || new Error("搜索失败");
+  const sre = /class='result-snippet'>([\s\S]*?)<\/td>/gi;
+  let i = 0;
+  while ((m = sre.exec(html)) && i < out.length) {
+    out[i].snippet = decodeEntities(m[1].replace(/<[^>]*>/g, "")).trim().slice(0, 200);
+    i++;
+  }
+  return out;
+}
+function parseBing(html) {
+  // Bing 把真实目标 URL 放在 <cite>https://host › path › page</cite> 里
+  const out = [];
+  const blocks = String(html).split('class="b_algo"');
+  for (let b = 1; b < blocks.length && out.length < 10; b++) {
+    const seg = blocks[b].slice(0, 8000);
+    const cm = /<cite>([^<]{5,300})<\/cite>/.exec(seg);
+    if (!cm) continue;
+    let url = decodeEntities(cm[1]).replace(/\s*[›>]\s*/g, "/").replace(/\s+/g, "").replace(/\/+$/, "");
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+    let title = url;
+    const tm = /<h2[^>]*>\s*<a[^>]*>([\s\S]{1,300}?)<\/a>\s*<\/h2>/.exec(seg);
+    if (tm) title = decodeEntities(tm[1].replace(/<[^>]*>/g, "")).trim() || title;
+    if (out.some((o) => o.url === url)) continue;
+    out.push({ title, url, snippet: "" });
+  }
+  return out;
+}
+async function webSearch(query) {
+  const q = encodeURIComponent(query);
+  const providers = [
+    { name: "ddg-html", url: "https://html.duckduckgo.com/html/?q=" + q, parse: parseDdgHtml },
+    { name: "ddg-lite", url: "https://lite.duckduckgo.com/lite/?q=" + q, parse: parseDdgLite },
+    { name: "bing", url: "https://www.bing.com/search?q=" + q, parse: parseBing },
+  ];
+  const attempts = providers.map((p) =>
+    fetchBuffer(p.url, { timeoutMs: 12000, maxBytes: 1024 * 1024 })
+      .then(({ buffer }) => {
+        const html = new TextDecoder("utf-8").decode(buffer);
+        const results = p.parse(html, p.url);
+        if (!results.length) throw new Error(p.name + "：无搜索结果");
+        return results;
+      })
+      .catch((e) => { console.error("[search]", p.name, "失败:", e.message); throw e; })
+  );
+  const settled = await Promise.allSettled(attempts);
+  for (const s of settled) {
+    if (s.status === "fulfilled" && s.value && s.value.length) return s.value;
+  }
+  const msgs = settled
+    .filter((s) => s.status === "rejected")
+    .map((s) => String((s.reason && s.reason.message) || s.reason));
+  throw new Error(msgs.length ? msgs.join("；") : "搜索失败");
 }
 
 /* ---------------- HTTP 服务 ---------------- */
@@ -233,7 +283,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && p === "/api/search") {
     const q = (u.searchParams.get("q") || "").trim().slice(0, 100);
     if (!q) { json(res, 400, { ok: false, error: "缺少 q 参数" }); return; }
-    ddgSearch(q + " 投稿须知").then((results) => {
+    webSearch(q + " 投稿须知").then((results) => {
       json(res, 200, { ok: true, query: q, results });
     }).catch((e) => {
       json(res, 502, { ok: false, error: "联网搜索失败：" + e.message });
