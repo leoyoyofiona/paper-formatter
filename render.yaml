@@ -1,7 +1,8 @@
 services:
-  # 前端静态站（网址不变）
-  - type: static
+  # 前端静态站（网址不变；type: web + runtime: static 即 Static Site）
+  - type: web
     name: paper-formatter
+    runtime: static
     staticPublishPath: ./
   # 在线查找 API（Node，零依赖）
   - type: web
