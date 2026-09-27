@@ -2805,6 +2805,21 @@ PF.checks = (function () {
   }
 
   // ---------------- 期刊在线查找（仅在线版，后端 /api/*） ----------------
+  var lastCandidates = []; // 最近一次搜索的候选页，抓取失败时保留以便换一条重试
+  function renderCandidates(results, noticeHTML) {
+    var box = $("journal-online-result");
+    var html = (noticeHTML || "") + "<h4>搜到以下投稿须知候选页（请认准期刊官网）</h4>";
+    results.forEach(function (it) {
+      html += '<div class="cand"><div style="flex:1"><b>' + esc(it.title) + "</b>" +
+        '<div class="rs">' + esc(it.url) + "</div>" +
+        (it.snippet ? '<div class="rs">' + esc(it.snippet) + "</div>" : "") + "</div>" +
+        '<div><button class="btn" data-u="' + esc(it.url) + '">抓取并解析</button></div></div>';
+    });
+    box.innerHTML = html;
+    box.querySelectorAll("button[data-u]").forEach(function (b) {
+      b.onclick = function () { fetchParseJournal(b.getAttribute("data-u")); };
+    });
+  }
   async function onlineJournalSearch() {
     var name = $("journal-name").value.trim();
     if (!name) { toast("请输入期刊名"); return; }
@@ -2825,17 +2840,8 @@ PF.checks = (function () {
       box.innerHTML = '<p class="hint">没有搜到相关投稿须知页面，换个关键词试试，或改用「粘贴投稿须知」。</p>';
       return;
     }
-    var html = "<h4>搜到以下投稿须知候选页（请认准期刊官网）</h4>";
-    data.results.forEach(function (it) {
-      html += '<div class="cand"><div style="flex:1"><b>' + esc(it.title) + "</b>" +
-        '<div class="rs">' + esc(it.url) + "</div>" +
-        (it.snippet ? '<div class="rs">' + esc(it.snippet) + "</div>" : "") + "</div>" +
-        '<div><button class="btn" data-u="' + esc(it.url) + '">抓取并解析</button></div></div>';
-    });
-    box.innerHTML = html;
-    box.querySelectorAll("button[data-u]").forEach(function (b) {
-      b.onclick = function () { fetchParseJournal(b.getAttribute("data-u")); };
-    });
+    lastCandidates = data.results;
+    renderCandidates(data.results);
   }
 
   async function fetchParseJournal(url) {
@@ -2845,9 +2851,11 @@ PF.checks = (function () {
       var data = await fetchJSON(API_BASE + "/api/fetch?url=" + encodeURIComponent(url), 50000);
       if (data && data.__transportError) data = { ok: false, error: data.__transportError };
       if (!data || !data.ok) {
-        box.innerHTML = '<p class="hint">抓取失败' +
+        // 保留候选列表，让用户真的可以"换一个候选页重试"
+        renderCandidates(lastCandidates,
+          '<p class="hint">抓取失败' +
           (data && data.error ? '（' + esc(data.error) + '）' : '') +
-          '。可换一个候选页重试，或把投稿须知文字复制到「粘贴投稿须知」手动解析。</p>';
+          '。可换一个候选页重试，或把投稿须知文字复制到「粘贴投稿须知」手动解析。</p>');
         return;
       }
       // 复用粘贴页签的解析流程
