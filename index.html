@@ -76,7 +76,7 @@ ol.steps { padding-left: 20px; } ol.steps li { margin: 8px 0; }
 <header class="topbar">
   <div class="wrap">
     <h1>📄 论文一键排版助手</h1>
-    <p class="sub">粘贴投稿须知 / 输入期刊名，一键排版 · 格式检查 · 参考文献转换 —— 论文只在本地浏览器处理，不上传 <span class="ver">v1.9.1</span></p>
+    <p class="sub">粘贴投稿须知 / 输入期刊名，一键排版 · 格式检查 · 参考文献转换 —— 论文只在本地浏览器处理，不上传 <span class="ver">v1.9.2</span></p>
   </div>
 </header>
 
@@ -140,7 +140,7 @@ ol.steps { padding-left: 20px; } ol.steps li { margin: 8px 0; }
         <button class="btn primary" id="btn-journal">查找模板</button>
       </div>
       <div id="journal-result"></div>
-      <p class="hint">离线版使用内置模板库；在线版可联网检索期刊官网的投稿须知并解析（会标注来源与可信度）。</p>
+      <p class="hint">期刊名查找只按内置规则推荐通用模板与参考文献格式，不联网检索期刊官网。如需该刊的具体格式要求，请用「粘贴投稿须知」把该刊官网的投稿须知文字粘贴进来解析，确认后可保存为模板复用。</p>
       <div id="saved-tpls"></div>
     </div>
 
@@ -2750,7 +2750,7 @@ PF.checks = (function () {
         '<div class="src">' + esc(r.reason) + "</div></div></label>";
     });
     html += '<div class="row"><button class="btn primary" id="btn-journal-apply">使用该组合排版</button></div>';
-    html += '<p class="hint">离线版暂不支持实时抓取期刊官网；在线版会联网检索官网投稿须知并标注来源与可信度。</p>';
+    html += '<p class="hint">此为按内置规则的通用推荐，未联网检索该期刊官网。如需该刊的具体要求，请用「粘贴投稿须知」粘贴该刊投稿须知文本进行解析。</p>';
     $("journal-result").innerHTML = html;
     $("btn-journal-apply").onclick = function () {
       var sel = document.querySelector('input[name="jrec"]:checked');
